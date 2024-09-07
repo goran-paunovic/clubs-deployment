@@ -1,0 +1,1 @@
+CREATE DATABASE clubdb_catalog;

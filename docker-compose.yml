@@ -1,0 +1,65 @@
+version: "3.8"
+services:
+
+  # Applications
+
+  club-catalog-service:
+    depends_on:
+      - club-postgres
+      - club-keycloak
+      - club-config-service
+    image: "club-catalog-service"
+    container_name: "club-catalog-service"
+    ports:
+      - 9001:9001
+      - 8001:8001
+    environment:
+      # Buildpacks environment variable to configure the number of threads in memory calculation
+      - BPL_JVM_THREAD_COUNT=50
+      # Buildpacks environment variable to enable debug through a socket on port 8001
+      - BPL_DEBUG_ENABLED=true
+      - BPL_DEBUG_PORT=8001
+      - SPRING_CLOUD_CONFIG_URI=http://club-config-service:8888
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://club-postgres:5432/clubdb_catalog
+      - SPRING_DATASOURCE_USERNAME=user
+      - SPRING_DATASOURCE_PASSWORD=password
+      - SPRING_PROFILES_ACTIVE=testdata      
+      - SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_ISSUER_URI=http://host.docker.internal:8080/realms/ClubCatalog
+
+  club-config-service:
+    image: "club-config-service"
+    container_name: "club-config-service"
+    ports:
+      - 8888:8888
+      - 9888:9888
+    environment:
+      # Buildpacks environment variable to configure the number of threads in memory calculation
+      - BPL_JVM_THREAD_COUNT=50
+      # Buildpacks environment variable to enable debug through a socket on port 9888
+      - BPL_DEBUG_ENABLED=true
+      - BPL_DEBUG_PORT=9888
+
+  # Backing Services
+
+  club-postgres:
+    image: "postgis/postgis:15-3.4-alpine"
+    container_name: "club-postgres"
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - ./postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  club-keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    container_name: "club-keycloak"
+    command: start-dev --import-realm
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import
+    environment:
+      - KEYCLOAK_ADMIN=user
+      - KEYCLOAK_ADMIN_PASSWORD=password
+    ports:
+      - 8080:8080
