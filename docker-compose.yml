@@ -1,13 +1,13 @@
-version: "3.8"
 services:
 
   # Applications
 
   club-catalog-service:
     depends_on:
-      - club-postgres
-      - club-keycloak
-      - club-config-service
+      club-postgres:
+        condition: service_healthy
+      club-config-service:
+        condition: service_started
     image: "club-catalog-service"
     container_name: "club-catalog-service"
     ports:
@@ -24,8 +24,6 @@ services:
       - SPRING_DATASOURCE_USERNAME=user
       - SPRING_DATASOURCE_PASSWORD=password
       - SPRING_PROFILES_ACTIVE=testdata      
-      - SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_ISSUER_URI=http://host.docker.internal:8080/realms/ClubCatalog
-
   club-config-service:
     image: "club-config-service"
     container_name: "club-config-service"
@@ -38,6 +36,36 @@ services:
       # Buildpacks environment variable to enable debug through a socket on port 9888
       - BPL_DEBUG_ENABLED=true
       - BPL_DEBUG_PORT=9888
+  club-edge-service:
+    depends_on:
+      club-redis:
+        condition: service_started
+      club-config-service:
+        condition: service_started
+      club-keycloak:
+        condition: service_healthy
+    image: "club-edge-service"
+    container_name: "club-edge-service"
+    ports:
+      - 9000:9000
+      - 8000:8000
+    environment:
+      # Buildpacks environment variable to enable debug through a socket on port 8000
+      - BPL_DEBUG_ENABLED=true
+      - BPL_DEBUG_PORT=8000
+      - CLUB_CATALOG_SERVICE_URL=http://club-catalog-service:9001
+      - SPRING_CLOUD_CONFIG_URI=http://club-config-service:8888
+      - SPRING_DATA_REDIS_HOST=club-redis
+      - SPA_URL=http://club-ui:3000
+      - SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_ISSUER_URI=http://host.docker.internal:8080/realms/ClubCatalog
+
+  club-ui:
+    image: "clubui"
+    container_name: "club-ui"
+    ports:
+      - 3000:3000
+    environment:
+      - PORT=3000
 
   # Backing Services
 
@@ -51,6 +79,18 @@ services:
       - POSTGRES_PASSWORD=password
     volumes:
       - ./postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+
+  club-redis:
+    image: "redis:7.4.0-alpine"
+    container_name: "club-redis"
+    ports:
+      - 6379:6379
 
   club-keycloak:
     image: quay.io/keycloak/keycloak:25.0
@@ -59,7 +99,13 @@ services:
     volumes:
       - ./keycloak:/opt/keycloak/data/import
     environment:
-      - KEYCLOAK_ADMIN=user
-      - KEYCLOAK_ADMIN_PASSWORD=password
+      KEYCLOAK_ADMIN: user
+      KEYCLOAK_ADMIN_PASSWORD: password
+      KC_HEALTH_ENABLED: true
     ports:
       - 8080:8080
+    healthcheck:
+      test: [ "CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000;echo -e 'GET /health/ready HTTP/1.1\r\nhost: http://localhost\r\nConnection: close\r\n\r\n' >&3;if [ $? -eq 0 ]; then echo 'Healthcheck Successful';exit 0;else echo 'Healthcheck Failed';exit 1;fi;" ]
+      interval: 10s
+      timeout: 10s
+      retries: 3
